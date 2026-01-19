@@ -1,131 +1,225 @@
-import { createContext, ReactNode, useContext, useState } from 'react';
+import { createContext, ReactNode, useContext, useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import { Platform } from 'react-native';
+import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
 
-// Dummy user data
-export const DUMMY_USERS = {
-  students: [
-    {
-      id: 'STU001',
-      email: 'alex@school.com',
-      password: 'student123',
-      name: 'Alex Johnson',
-      role: 'student',
-      class: '10-B',
-      rollNo: '15',
-      phone: '+1 234 567 8901',
-      avatar: null,
-      attendance: 85,
-      gpa: 3.8,
-    },
-    {
-      id: 'STU002',
-      email: 'emma@school.com',
-      password: 'student123',
-      name: 'Emma Johnson',
-      role: 'student',
-      class: '8-A',
-      rollNo: '08',
-      phone: '+1 234 567 8902',
-      avatar: null,
-      attendance: 92,
-      gpa: 3.5,
-    },
-    {
-      id: 'STU003',
-      email: 'michael@school.com',
-      password: 'student123',
-      name: 'Michael Johnson',
-      role: 'student',
-      class: '5-C',
-      rollNo: '12',
-      phone: '+1 234 567 8905',
-      avatar: null,
-      attendance: 78,
-      gpa: 3.2,
-    },
-  ],
-  parents: [
-    {
-      id: 'PAR001',
-      email: 'parent@school.com',
-      password: 'parent123',
-      name: 'Robert Johnson',
-      role: 'parent',
-      phone: '+1 234 567 8903',
-      children: ['STU001', 'STU002', 'STU003'], // Parent with 3 children
-      avatar: null,
-    },
-    {
-      id: 'PAR002',
-      email: 'mary@school.com',
-      password: 'parent123',
-      name: 'Mary Williams',
-      role: 'parent',
-      phone: '+1 234 567 8904',
-      children: ['STU002'],
-      avatar: null,
-    },
-  ],
+// Configure base URL based on environment
+// For physical devices, we need the LAN IP address
+const getBaseUrl = () => {
+  if (__DEV__) {
+    // Automatically detected LAN IP
+    return 'http://192.168.100.127:5000/api';
+  }
+  return 'https://api.yourschool.com/api'; // Production URL
 };
 
-// Helper function to get children data for a parent
-export const getChildrenData = (childrenIds: string[]) => {
-  return DUMMY_USERS.students.filter((student) =>
-    childrenIds.includes(student.id)
-  );
-};
+export const API_URL = getBaseUrl();
+
+// Create axios instance
+export const api = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
 
 interface User {
-  id: string;
+  _id: string;
+  id: string; // alias for _id for compatibility
   email: string;
   name: string;
-  role: 'student' | 'parent';
-  class?: string;
+  // Enhanced fields for UI
+  firstName?: string;
+  photo?: string;
+  section?: string;
+
+  role: 'student' | 'parent' | 'teacher' | 'staff';
+  class?: string | any;
   rollNo?: string;
   phone?: string;
-  children?: string[];
+  children?: any[];
   avatar?: string | null;
+  branch?: any;
+  dashboard?: {
+    upcomingExams: any[];
+    gpa: string;
+    feeDue: number;
+    attendance: {
+      percentage: number;
+      present: number;
+      total: number;
+    };
+  };
 }
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  userRole: 'student' | 'parent' | null;
-  login: (email: string, password: string, role: 'student' | 'parent') => Promise<{ success: boolean; error?: string }>;
-  logout: () => void;
+  userRole: string | null;
+  isLoading: boolean;
+  login: (email: string, password: string, role: string) => Promise<{ success: boolean; error?: string }>;
+  logout: () => Promise<void>;
+  updateProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [userRole, setUserRole] = useState<'student' | 'parent' | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Check for stored token on mount
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  const checkAuth = async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const storedUser = await AsyncStorage.getItem('user');
+
+      if (token && storedUser) {
+        // Set default header
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+        // Restore user session
+        const parsedUser = JSON.parse(storedUser);
+        setUser(parsedUser);
+        setUserRole(parsedUser.role);
+
+        // Verify token validity with backend
+        try {
+          const response = await api.get('/mobile/auth/me');
+          if (response.data.success) {
+            const userData = response.data.data.user;
+            // Map _id to id for compatibility
+            userData.id = userData._id;
+
+            // Merge with profile data if available
+            if (response.data.data.profile) {
+              Object.assign(userData, response.data.data.profile);
+            }
+            // Add children for parents
+            if (response.data.data.children) {
+              userData.children = response.data.data.children;
+            }
+            // Add dashboard data
+            if (response.data.data.dashboard) {
+              userData.dashboard = response.data.data.dashboard;
+            }
+
+            setUser(userData);
+            setUserRole(userData.role);
+            await AsyncStorage.setItem('user', JSON.stringify(userData));
+          }
+        } catch (error) {
+          // Token invalid or expired
+          await logout();
+        }
+      }
+    } catch (error) {
+      console.error('Auth check failed:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const login = async (
     email: string,
     password: string,
-    role: 'student' | 'parent'
+    role: string
   ): Promise<{ success: boolean; error?: string }> => {
-    // Simulate API delay
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      // Get device info for registration
+      const deviceId = Device.osBuildId || 'unknown-device';
+      const deviceName = Device.modelName || 'Unknown Device';
 
-    const users = role === 'student' ? DUMMY_USERS.students : DUMMY_USERS.parents;
-    const foundUser = users.find(
-      (u) => (u.email.toLowerCase() === email.toLowerCase() || u.id.toLowerCase() === email.toLowerCase()) && u.password === password
-    );
+      // Get push token if permissions allow (simplified)
+      let deviceToken = null;
+      // Note: Actual permission request logic should be in a separate hook/component
 
-    if (foundUser) {
-      const { password: _, ...userWithoutPassword } = foundUser;
-      setUser(userWithoutPassword as User);
-      setUserRole(role);
-      return { success: true };
+      const response = await api.post('/mobile/auth/login', {
+        email,
+        password,
+        role, // Send role for verification if needed server-side or just logging
+        deviceId,
+        deviceName,
+        platform: Platform.OS,
+        deviceToken
+      });
+
+      if (response.data.success) {
+        const { token, data } = response.data;
+        const userData = data.user;
+
+        // Map _id to id for compatibility
+        userData.id = userData._id;
+
+        // Merge with profile data if available
+        if (data.profile) {
+          Object.assign(userData, data.profile);
+        }
+        // Add children for parents
+        if (data.children) {
+          userData.children = data.children;
+        }
+        // Add dashboard data
+        if (data.dashboard) {
+          userData.dashboard = data.dashboard;
+        }
+
+        // Save session
+        await AsyncStorage.setItem('token', token);
+        await AsyncStorage.setItem('user', JSON.stringify(userData));
+
+        // Set axios header
+        api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+        setUser(userData);
+        setUserRole(userData.role);
+
+        return { success: true };
+      }
+
+      return { success: false, error: response.data.message || 'Login failed' };
+    } catch (error: any) {
+      console.error('Login error:', error);
+      const msg = error.response?.data?.message || 'Connection error. Please try again.';
+      return { success: false, error: msg };
     }
-
-    return { success: false, error: 'Invalid email/ID or password' };
   };
 
-  const logout = () => {
-    setUser(null);
-    setUserRole(null);
+  const logout = async () => {
+    try {
+      // Notify backend if possible
+      try {
+        const deviceId = Device.osBuildId || 'unknown-device';
+        await api.post('/mobile/auth/logout', { deviceId });
+      } catch (e) {
+        // Ignore error on logout api call
+        console.log('Logout API call failed, continuing local logout');
+      }
+
+      // Clear local storage
+      await AsyncStorage.removeItem('token');
+      await AsyncStorage.removeItem('user');
+
+      // Reset state
+      setUser(null);
+      setUserRole(null);
+
+      // Clear header
+      delete api.defaults.headers.common['Authorization'];
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
+  const updateProfile = async () => {
+    await checkAuth();
   };
 
   return (
@@ -134,8 +228,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         isAuthenticated: !!user,
         userRole,
+        isLoading,
         login,
         logout,
+        updateProfile
       }}
     >
       {children}
@@ -150,3 +246,6 @@ export function useAuth() {
   }
   return context;
 }
+
+// Export dummy users for reference only - can be removed later
+export const DUMMY_USERS = { students: [], parents: [] };

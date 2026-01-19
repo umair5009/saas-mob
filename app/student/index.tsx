@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import CircularProgress from '@/components/CircularProgress';
 import { useTheme } from '@/context/ThemeContext';
+import { useAuth } from '@/context/AuthContext';
 
 const { width } = Dimensions.get('window');
 
@@ -21,6 +22,7 @@ export default function StudentDashboard() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { theme, isDark } = useTheme();
+  const { user } = useAuth(); // Get user from context
 
   const quickActions = [
     { icon: 'calendar', label: 'Timetable', color: '#E0F2FE', iconColor: '#0284C7' },
@@ -29,32 +31,17 @@ export default function StudentDashboard() {
     { icon: 'library', label: 'Library', color: '#DBEAFE', iconColor: '#2563EB' },
   ];
 
-  const upcomingExams = [
-    {
-      id: 1,
-      subject: 'Mathematics',
-      chapter: 'Chapter 5 - 12',
-      date: 'Oct 24, 2023',
-      time: '09:00 AM - 11:00 AM',
-      room: 'Room 302',
-      type: 'Finals',
-      icon: 'calculator',
-      iconBg: '#FEE2E2',
-      iconColor: '#DC2626',
-    },
-    {
-      id: 2,
-      subject: 'Physics',
-      chapter: 'Thermodynamics',
-      date: 'Oct 26, 2023',
-      time: '09:00 AM - 11:00 AM',
-      room: 'Science Lab',
-      type: 'Mid-term',
-      icon: 'flask',
-      iconBg: '#DBEAFE',
-      iconColor: '#2563EB',
-    },
-  ];
+  // Use data from context or fallback to empty
+  const dashboardData = user?.dashboard || {};
+  const upcomingExams = dashboardData?.upcomingExams || [];
+  const gpa = dashboardData?.gpa || '0.0';
+  const feeDue = dashboardData?.feeDue || 0;
+  const attendance = dashboardData?.attendance || { percentage: 0, present: 0, total: 0 };
+
+  // Format info
+  const className = typeof user?.class === 'object' ? (user.class as any).name : user?.class || 'N/A';
+  const section = user?.section || '';
+  const fullClassName = `${className}-${section}`;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, backgroundColor: theme.background }]}>
@@ -63,8 +50,8 @@ export default function StudentDashboard() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={[styles.classLabel, { color: theme.textSecondary }]}>Class 10-B</Text>
-            <Text style={[styles.greeting, { color: theme.text }]}>Hello, Alex</Text>
+            <Text style={[styles.classLabel, { color: theme.textSecondary }]}>Class {fullClassName}</Text>
+            <Text style={[styles.greeting, { color: theme.text }]}>Hello, {user?.firstName || 'Student'}</Text>
           </View>
           <View style={styles.headerRight}>
             <TouchableOpacity
@@ -72,33 +59,40 @@ export default function StudentDashboard() {
               onPress={() => router.push('/student/notifications')}
             >
               <Ionicons name="notifications-outline" size={24} color={theme.text} />
-              <View style={[styles.notificationDot, { backgroundColor: theme.error }]} />
+              {/* Show dot if notifications exist - logic pending */}
+              {/* <View style={[styles.notificationDot, { backgroundColor: theme.error }]} /> */}
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.avatarContainer}
               onPress={() => router.push('/student/profile')}
             >
-              <View style={[styles.avatar, { backgroundColor: theme.backgroundTertiary, borderColor: theme.successLight }]}>
-                <Ionicons name="person" size={24} color={theme.textSecondary} />
-              </View>
+              {user?.photo ? (
+                <Image source={{ uri: user.photo }} style={{ width: 44, height: 44 }} />
+              ) : (
+                <View style={[styles.avatar, { backgroundColor: theme.backgroundTertiary, borderColor: theme.successLight }]}>
+                  <Ionicons name="person" size={24} color={theme.textSecondary} />
+                </View>
+              )}
             </TouchableOpacity>
           </View>
         </View>
 
-        {/* Fee Alert Card */}
-        <View style={[styles.feeCard, { backgroundColor: theme.card, borderLeftColor: theme.warning }]}>
-          <View style={styles.feeHeader}>
-            <Ionicons name="warning" size={20} color={theme.warning} />
-            <Text style={[styles.feeTitle, { color: theme.text }]}>Tuition Fee Due</Text>
+        {/* Fee Alert Card - Show only if dues exist */}
+        {feeDue > 0 && (
+          <View style={[styles.feeCard, { backgroundColor: theme.card, borderLeftColor: theme.warning }]}>
+            <View style={styles.feeHeader}>
+              <Ionicons name="warning" size={20} color={theme.warning} />
+              <Text style={[styles.feeTitle, { color: theme.text }]}>Tuition Fee Due</Text>
+            </View>
+            <Text style={[styles.feeDescription, { color: theme.textSecondary }]}>
+              You have a pending payment of <Text style={[styles.feeAmount, { color: theme.text }]}>${feeDue.toLocaleString()}</Text>.
+            </Text>
+            <TouchableOpacity style={[styles.payButton, { backgroundColor: theme.success }]}>
+              <Ionicons name="card-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.payButtonText}>Pay Now</Text>
+            </TouchableOpacity>
           </View>
-          <Text style={[styles.feeDescription, { color: theme.textSecondary }]}>
-            You have a pending payment of <Text style={[styles.feeAmount, { color: theme.text }]}>$450.00</Text> due by Oct 30.
-          </Text>
-          <TouchableOpacity style={[styles.payButton, { backgroundColor: theme.success }]}>
-            <Ionicons name="card-outline" size={18} color="#FFFFFF" />
-            <Text style={styles.payButtonText}>Pay Now</Text>
-          </TouchableOpacity>
-        </View>
+        )}
 
         {/* Attendance Card */}
         <TouchableOpacity
@@ -109,12 +103,14 @@ export default function StudentDashboard() {
           <View style={styles.attendanceLeft}>
             <Text style={[styles.attendanceTitle, { color: theme.text }]}>Attendance</Text>
             <Text style={[styles.attendanceSubtitle, { color: theme.textSecondary }]}>Overall performance</Text>
-            <View style={[styles.statusBadge, { backgroundColor: theme.successLight }]}>
-              <Text style={[styles.statusText, { color: theme.successDark }]}>Good Standing</Text>
+            <View style={[styles.statusBadge, { backgroundColor: Number(attendance.percentage) > 75 ? theme.successLight : theme.warningLight }]}>
+              <Text style={[styles.statusText, { color: Number(attendance.percentage) > 75 ? theme.successDark : theme.warningDark }]}>
+                {Number(attendance.percentage) > 75 ? 'Good Standing' : 'Needs Improvement'}
+              </Text>
             </View>
-            <Text style={[styles.daysPresent, { color: theme.textTertiary }]}>102/120 Days Present</Text>
+            <Text style={[styles.daysPresent, { color: theme.textTertiary }]}>{attendance.present}/{attendance.total} Days Present</Text>
           </View>
-          <CircularProgress percentage={85} size={90} strokeWidth={10} color={theme.primary} bgColor={isDark ? theme.backgroundTertiary : '#E5E7EB'} textColor={theme.text} />
+          <CircularProgress percentage={Number(attendance.percentage)} size={90} strokeWidth={10} color={theme.primary} bgColor={isDark ? theme.backgroundTertiary : '#E5E7EB'} textColor={theme.text} />
         </TouchableOpacity>
 
         {/* Stats Row */}
@@ -123,14 +119,14 @@ export default function StudentDashboard() {
             <View style={[styles.statIconBg, { backgroundColor: theme.secondaryLight }]}>
               <Ionicons name="school-outline" size={24} color={theme.secondary} />
             </View>
-            <Text style={[styles.statValue, { color: theme.text }]}>3.8</Text>
+            <Text style={[styles.statValue, { color: theme.text }]}>{gpa}</Text>
             <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Current GPA</Text>
           </View>
           <View style={[styles.statCard, { backgroundColor: theme.card }]}>
             <View style={[styles.statIconBg, { backgroundColor: theme.primaryLight }]}>
               <Ionicons name="clipboard-outline" size={24} color={theme.primary} />
             </View>
-            <Text style={[styles.statValue, { color: theme.text }]}>12</Text>
+            <Text style={[styles.statValue, { color: theme.text }]}>{dashboardData.assignments || 0}</Text>
             <Text style={[styles.statLabel, { color: theme.textSecondary }]}>Assignments</Text>
           </View>
         </View>
@@ -143,39 +139,49 @@ export default function StudentDashboard() {
           </TouchableOpacity>
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.examsContainer}
-        >
-          {upcomingExams.map((exam) => (
-            <View key={exam.id} style={[styles.examCard, { backgroundColor: theme.card }]}>
-              <View style={styles.examHeader}>
-                <View style={[styles.examIconBg, { backgroundColor: isDark ? theme.backgroundTertiary : exam.iconBg }]}>
-                  <Ionicons name={exam.icon as any} size={20} color={isDark ? theme.primary : exam.iconColor} />
+        {upcomingExams.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.examsContainer}
+          >
+            {upcomingExams.map((exam: any, index: number) => (
+              <View key={index} style={[styles.examCard, { backgroundColor: theme.card }]}>
+                <View style={styles.examHeader}>
+                  <View style={[styles.examIconBg, { backgroundColor: isDark ? theme.backgroundTertiary : '#DBEAFE' }]}>
+                    <Ionicons name="create-outline" size={20} color={isDark ? theme.primary : '#2563EB'} />
+                  </View>
+                  <View style={[styles.examTypeBadge, { backgroundColor: theme.backgroundTertiary }]}>
+                    <Text style={[styles.examTypeText, { color: theme.text }]}>{exam.examType || 'Exam'}</Text>
+                  </View>
                 </View>
-                <View style={[styles.examTypeBadge, { backgroundColor: theme.backgroundTertiary }]}>
-                  <Text style={[styles.examTypeText, { color: theme.text }]}>{exam.type}</Text>
+                <Text style={[styles.examSubject, { color: theme.text }]}>{exam.subject}</Text>
+                {/* <Text style={[styles.examChapter, { color: theme.textSecondary }]}>{exam.chapter}</Text> */}
+                <View style={[styles.examDivider, { backgroundColor: theme.borderLight }]} />
+                <View style={styles.examDetail}>
+                  <Ionicons name="calendar-outline" size={14} color={theme.textSecondary} />
+                  <Text style={[styles.examDetailText, { color: theme.textSecondary }]}>
+                    {new Date(exam.examDate).toLocaleDateString()}
+                  </Text>
+                </View>
+                <View style={styles.examDetail}>
+                  <Ionicons name="time-outline" size={14} color={theme.textSecondary} />
+                  <Text style={[styles.examDetailText, { color: theme.textSecondary }]}>
+                    {exam.startTime} - {exam.endTime}
+                  </Text>
+                </View>
+                <View style={styles.examDetail}>
+                  <Ionicons name="location-outline" size={14} color={theme.textSecondary} />
+                  <Text style={[styles.examDetailText, { color: theme.textSecondary }]}>{exam.room || 'TBD'}</Text>
                 </View>
               </View>
-              <Text style={[styles.examSubject, { color: theme.text }]}>{exam.subject}</Text>
-              <Text style={[styles.examChapter, { color: theme.textSecondary }]}>{exam.chapter}</Text>
-              <View style={[styles.examDivider, { backgroundColor: theme.borderLight }]} />
-              <View style={styles.examDetail}>
-                <Ionicons name="calendar-outline" size={14} color={theme.textSecondary} />
-                <Text style={[styles.examDetailText, { color: theme.textSecondary }]}>{exam.date}</Text>
-              </View>
-              <View style={styles.examDetail}>
-                <Ionicons name="time-outline" size={14} color={theme.textSecondary} />
-                <Text style={[styles.examDetailText, { color: theme.textSecondary }]}>{exam.time}</Text>
-              </View>
-              <View style={styles.examDetail}>
-                <Ionicons name="location-outline" size={14} color={theme.textSecondary} />
-                <Text style={[styles.examDetailText, { color: theme.textSecondary }]}>{exam.room}</Text>
-              </View>
-            </View>
-          ))}
-        </ScrollView>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={{ padding: 20, alignItems: 'center' }}>
+            <Text style={{ color: theme.textSecondary }}>No upcoming exams</Text>
+          </View>
+        )}
 
         {/* Quick Actions */}
         <Text style={[styles.sectionTitle, { color: theme.text }]}>Quick Actions</Text>
